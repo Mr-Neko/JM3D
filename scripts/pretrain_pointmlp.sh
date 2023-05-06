@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 main.py --model ULIP_PN_MLP --npoints 8192 --lr 1e-3 --output-dir ./mm23_outputs/pointmlp_8kpts --batch-size 128 --wandb --constrative_text 'sub' --class_text'super' --all_image
