@@ -1,4 +1,0 @@
-NAME: ScanObjectNN
-DATA_PATH: data/ScanObjectNN
-NUM_CATEGORY: 15
-USE_NORMALS: FALSE
