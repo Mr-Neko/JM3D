@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: BSD-3-Clause
  * For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
  * Changed from SLIP
- * https://github.com/facebookresearch/SLIP
- * By Le Xue
 '''
 import argparse
 from collections import OrderedDict
