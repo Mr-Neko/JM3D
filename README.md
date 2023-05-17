@@ -97,12 +97,12 @@ Three backbones of PointMLP, PointNet++(ssg), and PointBERT are supported. You c
 bash ./scripts/(choose your pre-train script)
 ```
 ## Zero-shot Test
-Be similiar like training, you can use:
+Be similiar to training, you can use:
 ```shell
 bash ./scripts/(choose your test script) /path/to/your/checkpoint.pt
 ```
 ## Croos-modal Retrieval
-Same like zero-shot, you should change the `test_zeroshot_3d_core()` in `test_zeroshot_3d()` to `cross_retrived()`
+Same as zero-shot, you should change the `test_zeroshot_3d_core()` in `test_zeroshot_3d()` to `cross_retrived()`
 
 # Pretrained Models
 We provide the pretrained models for PointMLP, PointNet++(ssg), and PointBERT. The models can be downloaded from [here](https://drive.google.com/drive/folders/1qRO1IzkPn6InSl1Sx0ACzsbWAXRHxizv?usp=sharing).
