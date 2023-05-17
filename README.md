@@ -87,7 +87,7 @@ Download the dataset on the [data](data), which will be like:
 ```
 The ModelNet40, ShapeNet55 and the initialize_models can be downloaded from [here](https://console.cloud.google.com/storage/browser/sfr-ulip-code-release-research;tab=objects?prefix=&forceOnObjectsSortingFiltering=false), and the ScanObjectNN can be downloaded from [here](https://hkust-vgd.github.io/scanobjectnn/).
 
-If you change your path of data, you should change the path config in the (dataset).yaml. To use your customized dataset, you should set a new \*.yaml and a new function in [dataset](data/data_3d.py).
+If you change your path of data, you should change the path config in the (dataset).yaml. To use your customized dataset, you should set a new \*.yaml and a new function in [dataset_3d.py](data/dataset_3d.py).
 ## Train
 **_Note_** : **The default number of point is 8192 to be same as the previous work. You can modify the number of points to adapt your work space. By the way, we use the FPS to downsample the point clouds, which is time costed. The pre-processed data will speed up your training with a little performance drop.** 
 
