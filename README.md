@@ -2,6 +2,10 @@
 [![](https://img.shields.io/badge/Paper-Arxiv-blue.svg)](https://arxiv.org/abs/2308.02982)
 [![](https://img.shields.io/badge/ACM%20MM2023-red)]()
 
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/beyond-first-impressions-integrating-joint/3d-point-cloud-classification-on-scanobjectnn)](https://paperswithcode.com/sota/3d-point-cloud-classification-on-scanobjectnn?p=beyond-first-impressions-integrating-joint)   
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/beyond-first-impressions-integrating-joint/zero-shot-3d-point-cloud-classification-on)](https://paperswithcode.com/sota/zero-shot-3d-point-cloud-classification-on?p=beyond-first-impressions-integrating-joint)   
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/beyond-first-impressions-integrating-joint/zero-shot-3d-point-cloud)](https://paperswithcode.com/sota/zero-shot-3d-point-cloud?p=beyond-first-impressions-integrating-joint)   
+
 The offical implemention of JM3D.
 
 ## What is JM3D
