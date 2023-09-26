@@ -282,6 +282,7 @@ class ModelNet(data.Dataset):
         # TODO: disable for backbones except for PointNEXT!!!
         self.use_height = config.use_height
 
+        # The split of hard_set and medium_set, you can change it as your wish.
         self.hard_set = ['cone', 'curtain', 'door', 'dresser', 'glass_box', 'mantel', 'night_stand', 'person', 'plant', 'radio', 'range_hood', 'sink', 'stairs', 'tent', 'toilet', 'tv_stand', 'xbox']
         self.medium_set = ['cone', 'cup', 'curtain', 'door', 'dresser', 'glass_box', 'mantel', 'monitor', 'night_stand', 'person', 'plant', 'radio', 'range_hood', 'sink', 'stairs', 'stool', 'tent', 'toilet', 'tv_stand', 'vase', 'wardrobe', 'xbox']
 
@@ -352,7 +353,7 @@ class ShapeNet(data.Dataset):
         self.picked_image_type = ['', '_depth0001']
         self.picked_rotation_degrees = list(range(0, 360, 12))
         self.picked_rotation_degrees = [(3 - len(str(degree))) * '0' + str(degree) if len(str(degree)) < 3 else str(degree) for degree in self.picked_rotation_degrees]
-        self.sub_id_map_addr = "/root/3d_pretrain/data/PreTrain/ShapeNet/all.csv"
+        self.sub_id_map_addr = "./data/ShapeNet_all.csv"
 
         with open(self.sub_id_map_addr, 'r') as f:
             sub_id_sets = list(csv.reader(f))
@@ -366,7 +367,7 @@ class ShapeNet(data.Dataset):
         with open(self.id_map_addr, 'r') as f:
             self.id_map = json.load(f)
 
-        with open('/root/3d_pretrain/data/PreTrain/ShapeNet/Class2Labels.json', 'r') as f:
+        with open('./data/ShapeNet_Class2Labels.json', 'r') as f:
             self.label_map = json.load(f)
 
         self.prompt_template_addr = os.path.join('./data/templates.json')
