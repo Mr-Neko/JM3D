@@ -23,7 +23,7 @@ Zero-shot classification on ModelNet40 with 8192 points.
 | :-----| :----: | :----: |
 | [PointNet2(ssg)](https://drive.google.com/file/d/1gZ6nCUrKAezFezUidj1unKI6-fby2f4k/view?usp=sharing) | 62.2 | 79.3 |
 | [PointMLP](https://drive.google.com/file/d/14HMMemeEJI2oUA3K8UPoFczr24M3x0d6/view?usp=sharing) | 65.8 | 82.1 |
-| [PointBERT](https://drive.google.com/file/d/1rdV5zH09-tuxm3OG9iNUAVSbJA8ZEzPE/view?usp=sharing) | 61.8 | 81.7 |
+| PointBERT | 61.8 | 81.7 |
 ## Instruction
 ### Environments
 Follow the [requirements](requirements.txt), the code is trained with CUDA>=11.0 and pytorch>=1.10.1. Follow the command that:
