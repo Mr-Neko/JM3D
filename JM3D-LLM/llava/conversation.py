@@ -24,6 +24,9 @@ class Conversation:
 
     skip_next: bool = False
 
+    def reset(self):
+        self.messages = self.messages[:self.offset]
+
     def get_prompt(self):
         if self.sep_style == SeparatorStyle.SINGLE:
             ret = self.system + self.sep
@@ -61,6 +64,11 @@ class Conversation:
 
     def append_message(self, role, message):
         self.messages.append([role, message])
+    
+    def pop_last_none_message(self):
+        # * pop the last message if it's None, this is used for multi-round dialogue
+        if self.messages[-1][1] is None:
+            self.messages.pop()
 
     def get_images(self, return_pil=False):
         images = []

@@ -15,8 +15,10 @@ classifiers = [
 dependencies = [
     "accelerate", "einops", "fastapi", "gradio==3.23", "markdown2[all]", "numpy",
     "requests", "sentencepiece", "tokenizers==0.12.1",
-    "torch", "torchvision", "uvicorn", "wandb",
-    "transformers @ git+https://github.com/huggingface/transformers.git@cae78c46"
+    "torch", "torchvision", "uvicorn", "wandb", "h5py", 
+    "open3d", "plyfile", "timm", "termcolor", "easydict",
+    "transformers==4.40.2", "nltk", "rouge", "sentence_transformers",
+    "openai==0.28.1"
 ]
 
 [project.urls]

@@ -1,2 +1,2 @@
 from .llava import LlavaLlamaForCausalLM, LlavaConfig
-from .llava_mpt import LlavaMPTForCausalLM, LlavaMPTConfig
+# from .llava_mpt import LlavaMPTForCausalLM, LlavaMPTConfig

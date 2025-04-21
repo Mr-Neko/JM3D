@@ -42,7 +42,7 @@ pip install flash-attn==1.0.2
 Download the JM3D-pretrained [PointMLP checkpoint](https://stuxmueducn-my.sharepoint.com/:f:/g/personal/22920182204313_stu_xmu_edu_cn/EklPiEX2CTZBmPrLVpotyaUBtKhmtxos7RI4I66Ld7eYzw?e=vBYPAi), and put it into `backbones/pointmlp/`
 
 #### Language Backbone
-Download the [Vicuna-7B checkpoint](https://huggingface.co/lmsys/vicuna-7b-v1.3), and put it into `backbones/vicuna-7b/`
+Download the [Vicuna-7B checkpoint](https://huggingface.co/lmsys/vicuna-7b-v1.1), and put it into `backbones/vicuna-7b/`
 
 ### Running
 ```

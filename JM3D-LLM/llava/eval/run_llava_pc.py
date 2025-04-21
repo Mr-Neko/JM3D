@@ -2,7 +2,7 @@ import argparse
 import torch
 import torch.utils.data as data
 
-from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
+from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.conversation import conv_templates, SeparatorStyle
 from llava.model.builder import load_pretrained_model
 from llava.utils import disable_torch_init
@@ -183,11 +183,27 @@ def get_chunk(lst, n, k):
 
 def pc_processor(pc_file, pc_dataset):
     if pc_dataset == 'shapenet' or pc_dataset == 'objaverse':
-        if pc_file.endswith('.pt'):
-            pc_data = torch.load(os.path.join(pc_file))
-            pc_data = pc_data[:3,:].permute(1, 0).numpy().astype(np.float32)
-        else:
-            pc_data = IO.get(os.path.join(pc_file)).astype(np.float32)
+        # if pc_file.endswith('.pt'):
+        #     pc_data = torch.load(os.path.join(pc_file))
+        #     pc_data = pc_data[:3,:].permute(1, 0).numpy().astype(np.float32)
+        # else:
+        #     pc_data = IO.get(os.path.join(pc_file)).astype(np.float32)
+
+        # pc_data = np.load(pc_file)['arr_0']
+        pc_data = np.load(pc_file)
+        # if pc_file.endswith('.pt'):
+        #     # pc_data = torch.load(os.path.join(self.pc_folder, pc_file))
+        #     pc_data_name = f'{pc_file[:-3]}_8192'
+        #     try:
+        #         pc_data = np.load(os.path.join(self.pc_folder, pc_file[:-3], pc_data_name + '.npz'))
+        #     except:
+        #         # pc_data = np.load(os.path.join(self.pc_folder, pc_file[:-3], pc_data_name + '.npy'))
+        #         assert('fail to load npz file !!!!!!!!!!!')
+
+        #     # pc_data = pc_data[:3,:].permute(1, 0).numpy().astype(np.float32)
+        #     pc_data = pc_data['arr_0']
+        # else:
+        #     pc_data = IO.get(os.path.join(pc_file)).astype(np.float32)
 
 
         # print(pc_data.shape)
@@ -278,8 +294,12 @@ def eval_model(args):
     # model_name = get_model_name_from_path(args.model_path)
     model_name = args.model_name
     print('model_name', model_name)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(args.model_path, args.model_base, model_name)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(args.model_path, args.model_base, model_name, torch_dtype=args.torch_dtype)
+    model.initialize_tokenizer_point_backbone_config_wo_embedding(tokenizer)    
     model.eval()
+
+    import pdb
+    pdb.set_trace()
     # vision_tower = model.get_vision_tower()
     # vision_backbone = torch.load('backbones/pointmlp/pointmlp_backbone.pt', map_location='cpu')
     # vision_tower.load_state_dict(vision_backbone['state_dict'], strict=True)
@@ -298,9 +318,10 @@ def eval_model(args):
 
     qs = args.query
     if model.config.mm_use_im_start_end:
-        qs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + qs
+        # qs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + qs
+        qs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_PATCH_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + qs
     else:
-        qs = DEFAULT_IMAGE_TOKEN + '\n' + qs
+        qs = DEFAULT_IMAGE_PATCH_TOKEN + '\n' + qs
 
     if 'llama-2' in model_name.lower():
         conv_mode = "llava_llama_2"
@@ -322,7 +343,8 @@ def eval_model(args):
     prompt = conv.get_prompt()
     
     while 1:
-        pc_file = './data/Objaverse/Cap3D_pcs_pt/' + input('Enter point cloud id: ') + '.pt'
+        # pc_file = './data/Objaverse/Cap3D_pcs_pt/' + input('Enter point cloud id: ') + '.pt'
+        pc_file = args.pc_file
         if pc_file == 'exit':
             break
         pc_tensor = pc_processor(pc_file, args.pc_dataset)
@@ -336,16 +358,28 @@ def eval_model(args):
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
         keywords = [stop_str]
         stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
-
+        # import pdb
+        # pdb.set_trace()
         with torch.inference_mode():
             output_ids = model.generate(
                 input_ids,
-                pcs=pc_tensor.unsqueeze(0).half().cuda(),
+                # pcs=pc_tensor.unsqueeze(0).half().cuda(),
+                pcs=pc_tensor.unsqueeze(0).cuda(),
                 do_sample=True,
                 temperature=0.2,
                 max_new_tokens=1024,
                 use_cache=True,
                 stopping_criteria=[stopping_criteria])
+        # with torch.inference_mode():
+        #     output_ids = model.generate(
+        #         input_ids,
+        #         pcs=pc_tensor.unsqueeze_(0).cuda(),
+        #         do_sample=True,
+        #         temperature=0.2,
+        #         top_k=50,
+        #         max_length=2048,
+        #         top_p=0.95,
+        #         stopping_criteria=[stopping_criteria])
 
         input_token_len = input_ids.shape[1]
         n_diff_input_output = (input_ids != output_ids[:, :input_token_len]).sum().item()
@@ -369,6 +403,16 @@ if __name__ == "__main__":
     parser.add_argument("--query", type=str, required=True)
     parser.add_argument("--conv-mode", type=str, default='v1')
     parser.add_argument("--pc_dataset", type=str, default='shapenet', help='shapenet / modelnet / scannet')
+    parser.add_argument("--torch_dtype", type=str, default="float32", choices=["float32", "float16", "bfloat16"])
     args = parser.parse_args()
+
+    dtype_mapping = {
+        "float32": torch.float32,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+    }
+
+    args.torch_dtype = dtype_mapping[args.torch_dtype]
+
 
     eval_model(args)

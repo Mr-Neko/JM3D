@@ -17,6 +17,7 @@
 import os
 import copy
 from dataclasses import dataclass, field
+from typing import Optional, List
 import json
 import logging
 import pathlib
@@ -38,7 +39,7 @@ import numpy as np
 
 # TODO: import and use code from ../data/dataset.py
 
-from llava.constants import DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_END_TOKEN, IGNORE_INDEX, DEFAULT_PAD_TOKEN, DEFAULT_EOS_TOKEN, DEFAULT_BOS_TOKEN, DEFAULT_UNK_TOKEN
+from llava.constants import IGNORE_INDEX, DEFAULT_PAD_TOKEN, DEFAULT_EOS_TOKEN, DEFAULT_BOS_TOKEN, DEFAULT_UNK_TOKEN
 # DEFAULT_IMAGE_PATCH_TOKEN = "<im_patch>"
 # DEFAULT_IM_START_TOKEN = "<im_start>"
 # DEFAULT_IM_END_TOKEN = "<im_end>"
@@ -171,25 +172,36 @@ class ModelArguments:
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
     version: Optional[str] = field(default="v1")
     freeze_backbone: bool = field(default=False)
-    tune_mm_mlp_adapter: bool = field(default=False)
+    tune_mm_mlp_adapter: bool = field(default=True)
     vision_tower: Optional[str] = field(default=None)
     # mm_vision_select_layer: Optional[int] = field(default=-1)   # default to the last layer
     pretrain_mm_mlp_adapter: Optional[str] = field(default=None)
-    mm_use_im_start_end: bool = field(default=False)
+    mm_use_im_start_end: bool = field(default=True)
 
 
 @dataclass
 class DataArguments:
-    data_path: str = field(default=None,
-                           metadata={"help": "Path to the training data."})
-    lazy_preprocess: bool = False
-    is_multimodal: bool = False
-    # image_folder: Optional[str] = field(default=None)
-    pc_folder: Optional[str] = field(default=None)
-    uniform: bool = field(default=True)
-    augment: bool = field(default=True)
-    use_height: bool = field(default=False)
-    npoints: int = field(default=8192)
+    # data_path: str = field(default=None,
+    #                        metadata={"help": "Path to the training data."})
+    # anno_path: str = field(default=None,
+    #                        metadata={"help": "Path to the anno data."})
+    # lazy_preprocess: bool = False
+    # is_multimodal: bool = False
+    # # image_folder: Optional[str] = field(default=None)
+    # pc_folder: Optional[str] = field(default=None)
+    # uniform: bool = field(default=True)
+    # augment: bool = field(default=True)
+    # use_height: bool = field(default=False)
+    # npoints: int = field(default=8192)
+    data_path: str = field(default="data/objaverse_data", metadata={"help": "Path to the training data."})
+    anno_path: str = field(default=None, metadata={"help": "Path to the utterance data. If None, will use referit3d by defautl."})
+    use_color: bool = field(default=True, metadata={"help": "Whether to use color."})
+    data_debug_num: int = field(default=0, metadata={"help": "Number of data to use in debug mode. If larger than 0, use debug mode, else use the whole data"})
+    split_train_val: bool = field(default=False, metadata={"help": "Whether to split train and val."})
+    split_ratio: float = field(default=0.9, metadata={"help": "Ratio of train and val."})
+    pointnum: int = field(default=8192, metadata={"help": "Number of points."})
+    conversation_types: List[str] = field(default_factory=lambda: ["simple_description"], metadata={"help": "Conversation types to use."})
+    is_multimodal: bool = True
 
 
 @dataclass
@@ -197,11 +209,12 @@ class TrainingArguments(transformers.TrainingArguments):
     cache_dir: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
     num_gpus: int = field(default=1)
+    training_stage: int = field(default=1)
     remove_unused_columns: bool = field(default=False)
     freeze_mm_mlp_adapter: bool = field(default=False)
     force_fsdp: bool = field(default=False)
     model_max_length: int = field(
-        default=512,
+        default=2048,
         metadata={
             "help":
             "Maximum sequence length. Sequences will be right padded (and possibly truncated)."
@@ -306,33 +319,49 @@ def _add_speaker_and_signal(header, source, get_conversation=True):
     return conversation
 
 
+# def preprocess_multimodal(
+#     sources: Sequence[str],
+#     multimodal_cfg: dict,
+#     cur_token_len: int,
+# ) -> Dict:
+#     is_multimodal = multimodal_cfg.is_multimodal
+#     # image_token_len = multimodal_cfg['image_token_len']
+#     image_token_len = cur_token_len
+#     if not is_multimodal:
+#         return sources
+
+#     for source in sources:
+#         # if multimodal_cfg['sep_image_conv_front']:
+#         assert DEFAULT_IMAGE_TOKEN in source[0]['value']
+#         source[0]['value'] = source[0]['value'].replace(DEFAULT_IMAGE_TOKEN, '').strip()
+#         # source[0]['value'] = DEFAULT_IMAGE_TOKEN + conversation_lib.default_conversation.sep + conversation_lib.default_conversation.roles[0] + ": " + source[0]['value']
+#         # source[0]['value'] = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_PATCH_TOKEN*64 + DEFAULT_IM_END_TOKEN + conversation_lib.default_conversation.sep + source[0]['value']
+#         # source[0]['value'] = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_PATCH_TOKEN*64 + DEFAULT_IM_END_TOKEN + conversation_lib.default_conversation.sep + source[0]['value']
+#         source[0]['value'] = DEFAULT_IMAGE_TOKEN + conversation_lib.default_conversation.sep + source[0]['value']
+#         # for sentence in source:
+#         #     replace_token = DEFAULT_IMAGE_PATCH_TOKEN * image_token_len
+#         #     if multimodal_cfg['use_im_start_end']:
+#         #         replace_token = DEFAULT_IM_START_TOKEN + replace_token + DEFAULT_IM_END_TOKEN
+#         #     sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, replace_token)
+
+#     return sources
+
 def preprocess_multimodal(
     sources: Sequence[str],
-    multimodal_cfg: dict,
-    cur_token_len: int,
+    point_backbone_config: dict,
+    point_indicator: str = "<point>",
 ) -> Dict:
-    is_multimodal = multimodal_cfg.is_multimodal
-    # image_token_len = multimodal_cfg['image_token_len']
-    image_token_len = cur_token_len
-    if not is_multimodal:
-        return sources
-
+    point_token_len = point_backbone_config['point_token_len']
+    default_point_patch_token = point_backbone_config['default_point_patch_token']
     for source in sources:
-        # if multimodal_cfg['sep_image_conv_front']:
-        assert DEFAULT_IMAGE_TOKEN in source[0]['value']
-        source[0]['value'] = source[0]['value'].replace(DEFAULT_IMAGE_TOKEN, '').strip()
-        # source[0]['value'] = DEFAULT_IMAGE_TOKEN + conversation_lib.default_conversation.sep + conversation_lib.default_conversation.roles[0] + ": " + source[0]['value']
-        # source[0]['value'] = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_PATCH_TOKEN*64 + DEFAULT_IM_END_TOKEN + conversation_lib.default_conversation.sep + source[0]['value']
-        # source[0]['value'] = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_PATCH_TOKEN*64 + DEFAULT_IM_END_TOKEN + conversation_lib.default_conversation.sep + source[0]['value']
-        source[0]['value'] = DEFAULT_IMAGE_TOKEN + conversation_lib.default_conversation.sep + source[0]['value']
-        # for sentence in source:
-        #     replace_token = DEFAULT_IMAGE_PATCH_TOKEN * image_token_len
-        #     if multimodal_cfg['use_im_start_end']:
-        #         replace_token = DEFAULT_IM_START_TOKEN + replace_token + DEFAULT_IM_END_TOKEN
-        #     sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, replace_token)
+        for sentence in source:
+            replace_token = default_point_patch_token * point_token_len 
+            # replace_token = default_point_patch_token * 256 # qformer 
+            if point_backbone_config['mm_use_im_start_end']:
+                replace_token = point_backbone_config['default_point_start_token']+ replace_token + point_backbone_config['default_point_end_token']
+            sentence["value"] = sentence["value"].replace(point_indicator, replace_token)
 
     return sources
-
 
 def preprocess_v1(
     sources,
@@ -496,8 +525,8 @@ def preprocess(
     """
     if conversation_lib.default_conversation.version == "v1":
         return preprocess_v1(sources, tokenizer, has_image)
-    if conversation_lib.default_conversation.version == "mpt":
-        return preprocess_mpt(sources, tokenizer)
+    # if conversation_lib.default_conversation.version == "mpt":
+    #     return preprocess_mpt(sources, tokenizer)
     # add end signal and concatenate together
     conversations = []
     for source in sources:
@@ -527,146 +556,378 @@ def preprocess(
     return dict(input_ids=input_ids, labels=targets)
 
 
-class SupervisedDataset(Dataset):
-    """Dataset for supervised fine-tuning."""
+# class SupervisedDataset(Dataset):
+#     """Dataset for supervised fine-tuning."""
 
-    def __init__(self, data_path: str,
-                 tokenizer: transformers.PreTrainedTokenizer):
-        super(SupervisedDataset, self).__init__()
-        logging.warning("Loading data...")
-        list_data_dict = json.load(open(data_path, "r"))
+#     def __init__(self, data_path: str,
+#                  tokenizer: transformers.PreTrainedTokenizer):
+#         super(SupervisedDataset, self).__init__()
+#         logging.warning("Loading data...")
+#         list_data_dict = json.load(open(data_path, "r"))
 
-        logging.warning("Formatting inputs...")
-        sources = [example["conversations"] for example in list_data_dict]
-        data_dict = preprocess(sources, tokenizer)
+#         logging.warning("Formatting inputs...")
+#         sources = [example["conversations"] for example in list_data_dict]
+#         data_dict = preprocess(sources, tokenizer)
 
-        self.input_ids = data_dict["input_ids"]
-        self.labels = data_dict["labels"]
+#         self.input_ids = data_dict["input_ids"]
+#         self.labels = data_dict["labels"]
 
-    def __len__(self):
-        return len(self.input_ids)
+#     def __len__(self):
+#         return len(self.input_ids)
 
-    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
-        return dict(input_ids=self.input_ids[i], labels=self.labels[i])
+#     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
+#         return dict(input_ids=self.input_ids[i], labels=self.labels[i])
+    
+
+# class LazySupervisedDataset(Dataset):
+#     """Dataset for supervised fine-tuning."""
+
+#     def __init__(self, data_path: str,
+#                  anno_path: str,
+#                  tokenizer: transformers.PreTrainedTokenizer,
+#                  multimodal_cfg: DataArguments):
+#         super(LazySupervisedDataset, self).__init__()
+#         logging.warning("Loading data...")
+#         list_data_dict = json.load(open(anno_path, "r"))
+#         self.pc_folder = multimodal_cfg.pc_folder
+
+#         logging.warning("Formatting inputs...Skip in lazy mode")
+#         self.tokenizer = tokenizer
+#         self.list_data_dict = list_data_dict
+#         self.multimodal_cfg = multimodal_cfg
+#         self.sample_points_num = multimodal_cfg.npoints
+#         self.permutation = np.arange(multimodal_cfg.npoints)
+#         self.uniform = True
+#         self.augment = True        
+#         # =================================================
+#         # TODO: disable for backbones except for PointNEXT!!!
+#         self.use_height = multimodal_cfg.use_height
+#         # =================================================
+#         self.point_indicator = '<point>'
+
+#     def pc_norm(self, pc):
+#         """ pc: NxC, return NxC """
+#         centroid = np.mean(pc, axis=0)
+#         pc = pc - centroid
+#         m = np.max(np.sqrt(np.sum(pc ** 2, axis=1)))
+#         pc = pc / m
+#         return pc
+
+#     def random_sample(self, pc, num):
+#         np.random.shuffle(self.permutation)
+#         pc = pc[self.permutation[:num]]
+#         return pc
+    
+#     def __len__(self):
+#         return len(self.list_data_dict)
+
+#     def __getitem__(self, index) -> Dict[str, torch.Tensor]:
+#         # import pdb
+#         # pdb.set_trace()
+#         # sources = self.list_data_dict[i]
+#         # if isinstance(i, int):
+#         #     sources = [sources]
+#         # assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
+#         # if 'pc' in sources[0]:
+
+#         #     pc_file = self.list_data_dict[i]['pc']
+#         #     if pc_file.endswith('.pt'):
+#         #         # pc_data = torch.load(os.path.join(self.pc_folder, pc_file))
+#         #         pc_data_name = f'{pc_file[:-3]}_{self.sample_points_num}'
+#         #         try:
+#         #             pc_data = np.load(os.path.join(self.pc_folder, pc_file[:-3], pc_data_name + '.npz'))
+#         #         except:
+#         #             # pc_data = np.load(os.path.join(self.pc_folder, pc_file[:-3], pc_data_name + '.npy'))
+#         #             assert('fail to load npz file !!!!!!!!!!!')
+
+#         #         # pc_data = pc_data[:3,:].permute(1, 0).numpy().astype(np.float32)
+#         #         pc_data = pc_data['arr_0']
+#         #     else:
+#         #         pc_data = IO.get(os.path.join(self.pc_folder, pc_file)).astype(np.float32)
+
+#         #     if self.uniform and self.sample_points_num < pc_data.shape[0]:
+#         #         pc_data = farthest_point_sample(pc_data, self.sample_points_num)
+#         #     else:
+#         #         pc_data = self.random_sample(pc_data, self.sample_points_num)
+            
+#         #     pc_data = self.pc_norm(pc_data)
+
+#         #     if self.augment:
+#         #         pc_data = random_point_dropout(pc_data[None, ...])
+#         #         pc_data = random_scale_point_cloud(pc_data)
+#         #         pc_data = shift_point_cloud(pc_data)
+#         #         pc_data = rotate_perturbation_point_cloud(pc_data)
+#         #         pc_data = rotate_point_cloud(pc_data)
+#         #         pc_data = pc_data.squeeze()
+
+#         #     if self.use_height:
+#         #         self.gravity_dim = 1
+#         #         height_array = pc_data[:, self.gravity_dim:self.gravity_dim + 1] - pc_data[:,
+#         #                                                                 self.gravity_dim:self.gravity_dim + 1].min()
+#         #         pc_data = np.concatenate((pc_data, height_array), axis=1)
+#         #         pc_data = torch.from_numpy(pc_data).float()
+#         #     else:
+#         #         pc_data = torch.from_numpy(pc_data).float()
+#         #     # cur_token_len = (image.shape[1]//14) * (image.shape[2]//14)   # FIXME: 14 is hardcoded patch size
+#         #     cur_token_len = 1   # pc token is only one token
+#         #     # print('berfore process', sources)
+#         #     sources = preprocess_multimodal(
+#         #         copy.deepcopy([e["conversations"] for e in sources]),
+#         #         self.multimodal_cfg, cur_token_len)
+#         # else:
+#         #     sources = copy.deepcopy([e["conversations"] for e in sources])
+#         # # print('after process', sources)
+#         # data_dict = preprocess(
+#         #     sources,
+#         #     self.tokenizer, 
+#         #     has_image=True)
+#         # if isinstance(i, int):
+#         #     data_dict = dict(input_ids=data_dict["input_ids"][0],
+#         #                      labels=data_dict["labels"][0])
+
+#         # # print(self.list_data_dict[i])
+#         # # print(pc_data.shape)
+#         # # pc exist in the data
+#         # if 'pc' in self.list_data_dict[i]:
+#         #     data_dict['pc'] = pc_data
+#         # elif self.data_args.is_multimodal:
+#         #     # pc does not exist in the data, but the model is multimodal
+#         #     data_dict['pc'] = torch.zeros(1024, 3)
+#         # # # image exist in the data
+#         # # if 'image' in self.list_data_dict[i]:
+#         # #     data_dict['image'] = image
+#         # # elif self.multimodal_cfg['is_multimodal']:
+#         # #     # image does not exist in the data, but the model is multimodal
+#         # #     crop_size = self.multimodal_cfg['image_processor'].crop_size
+#         # #     data_dict['image'] = torch.zeros(3, crop_size['height'], crop_size['width'])
+#         # return data_dict
+#         sources = self.list_data_dict[index]
+#         print(len(self.list_data_dict), sources)
+#         import pdb
+#         pdb.set_trace()
+#         if isinstance(index, int):
+#             sources = [sources]
+#         assert len(sources) == 1, "sources should be a list"
+#         if self.point_indicator in sources[0]['conversations'][0]['value']:
+
+#             object_id = self.list_data_dict[index]['object_id']
+
+#             # Point cloud representation
+#             point_cloud = self._load_point_cloud(object_id) # * N, C
+#             point_cloud = self.pc_norm(point_cloud) # * need to norm since point encoder is norm
+
+#             if self.tokenizer is None:
+#                 data_dict = dict(
+#                     point_clouds=torch.from_numpy(point_cloud.astype(np.float32)),
+#                     object_ids=object_id
+#                 )
+#                 return data_dict
+
+#             sources = preprocess_multimodal(
+#                 copy.deepcopy([e["conversations"] for e in sources]), self.multimodal_cfg.point_backbone_config, point_indicator=self.point_indicator)
+#         else:
+#             sources = copy.deepcopy([e["conversations"] for e in sources])
+
+#         data_dict = preprocess_v1(
+#             sources,
+#             self.tokenizer)
+
+#         if isinstance(index, int):
+#             data_dict = dict(input_ids=data_dict["input_ids"][0],
+#                              labels=data_dict["labels"][0])
+
+#         # point exist in the data
+#         if self.point_indicator in self.list_data_dict[index]['conversations'][0]['value']:
+#             data_dict['point_clouds'] = torch.from_numpy(point_cloud.astype(np.float32))
+
+#         return data_dict
+    
+#     def _load_point_cloud(self, object_id):
+#         filename = f"{object_id}_{self.sample_points_num}.npy"
+#         try:
+#             point_cloud = np.load(os.path.join(self.data_path, filename))
+#             print(f'load from {os.path.join(self.data_path, filename)}')
+#         except:
+#             pc_fn = os.path.join('/home/myw/haowei/ULIP/data/ULIP-Objaverse_triplets/objaverse_pc_parallel', object_id, filename)
+#             print(f'load from {pc_fn}')
+#             try:
+#                 point_cloud = np.load(pc_fn)
+#             except:
+#                 pc_fn = pc_fn.replace('.npy','.npz')
+#                 point_cloud = np.load(pc_fn)['arr_0']
+
+#             # copy to the data_path
+#             # np.save(os.path.join(self.data_path, filename), point_cloud)
+
+#         # TODO(coco): use_color default True
+#         # if not self.use_color:
+#         #     try:
+#         #         point_cloud = point_cloud[:, :3]
+#         #     except:
+#         #         print(object_id, point_cloud.shape)
+#         #         # raise path
+#         #         raise ValueError(object_id + ' point cloud shape error')
+
+#         return point_cloud
 
 
 class LazySupervisedDataset(Dataset):
-    """Dataset for supervised fine-tuning."""
+    """Dataset utilities for objaverse."""
+    def __init__(self,
+                 data_path=None,
+                 anno_path=None,
+                 tokenizer=None,
+                 pointnum=8192,
+                 split='train',
+                 conversation_types=None, # * default is simple_des, used for stage1 pre-train
+                 use_color=True,
+                 data_args=None):
 
-    def __init__(self, data_path: str,
-                 tokenizer: transformers.PreTrainedTokenizer,
-                 multimodal_cfg: DataArguments):
+        """
+        split: only considered when data_args.split_train_val is True.
+        conversation_types: tuple, used to filter the data, default is ('simple_description'), other types is:
+            "detailed_description", "single_round", "multi_round".
+        tokenizer: load point clouds only if None
+        """
         super(LazySupervisedDataset, self).__init__()
-        logging.warning("Loading data...")
-        list_data_dict = json.load(open(data_path, "r"))
-        self.pc_folder = multimodal_cfg.pc_folder
 
-        logging.warning("Formatting inputs...Skip in lazy mode")
+        """Initialize dataset with object point clouds and text"""
+        self.data_path = data_path
+        self.anno_path = anno_path
         self.tokenizer = tokenizer
-        self.list_data_dict = list_data_dict
-        self.multimodal_cfg = multimodal_cfg
-        self.sample_points_num = multimodal_cfg.npoints
-        self.permutation = np.arange(multimodal_cfg.npoints)
-        self.uniform = True
-        self.augment = True        
-        # =================================================
-        # TODO: disable for backbones except for PointNEXT!!!
-        self.use_height = multimodal_cfg.use_height
-        # =================================================
+        self.split = split 
+        if conversation_types is None:
+            self.conversation_types = ("simple_description",)
+        else:
+            self.conversation_types = conversation_types
+
+        self.data_args = data_args
+        self.normalize_pc = True
+        self.use_color = use_color
+
+        self.pointnum = pointnum
+        self.point_backbone_config = data_args.point_backbone_config if data_args is not None else None
+        self.point_indicator = '<point>'
+
+        # Load the data list from JSON
+        print(f"Loading anno file from {anno_path}.")
+        with open(anno_path, "r") as json_file:
+            self.list_data_dict = json.load(json_file)
+        
+        # * print the conversations_type
+        print(f"Using conversation_type: {self.conversation_types}") 
+        # * print before filtering
+        print(f"Before filtering, the dataset size is: {len(self.list_data_dict)}.")
+
+        # * iterate the list and filter
+        # * these two ids have corrupted colored point files, so filter them when use_color is True
+        filter_ids = ['6760e543e1d645d5aaacd3803bcae524', 'b91c0711149d460a8004f9c06d3b7f38'] if self.use_color else []
+
+        # Iterate the list, filter those "conversation_type" not in self.conversation_types
+        self.list_data_dict = [
+            data for data in self.list_data_dict 
+            if data.get('conversation_type', 'simple_description') in self.conversation_types 
+            and data.get('object_id') not in filter_ids
+        ]
+
+        # * print after filtering
+        print(f"After filtering, the dataset size is: {len(self.list_data_dict)}.")
+        # * print the size of different conversation_type
+        for conversation_type in self.conversation_types:
+            print(f"Number of {conversation_type}: {len([data for data in self.list_data_dict if data.get('conversation_type', 'simple_description') == conversation_type])}")
+
+        if self.data_args is not None and self.data_args.data_debug_num > 0:
+            self.list_data_dict = self.list_data_dict[:self.data_args.data_debug_num]
+            # * print all the scan_id in debug mode, not using for loop
+            print('Debug mode, using: ' + ' '.join([data['object_id'] for data in self.list_data_dict]))
+        elif self.data_args is not None and self.data_args.split_train_val:
+            # * split train and val with 9:1 ratios
+            if self.split == 'train':
+                self.list_data_dict = self.list_data_dict[:int(self.data_args.split_ratio * len(self.list_data_dict))]
+                print(f"Train set size: {len(self.list_data_dict)}")
+            else:
+                self.list_data_dict = self.list_data_dict[int(self.data_args.split_ratio * len(self.list_data_dict)):]
+                print(f"Val set size: {len(self.list_data_dict)}")
+
+    def _load_point_cloud(self, object_id, type='objaverse'):
+        if type == 'objaverse':
+            return self._load_objaverse_point_cloud(object_id) 
+
+    def _load_objaverse_point_cloud(self, object_id):
+        filename = f"{object_id}_{self.pointnum}.npy"
+        point_cloud = np.load(os.path.join(self.data_path, filename))
+
+        if not self.use_color:
+            point_cloud = point_cloud[:, :3]
+
+        return point_cloud
 
     def pc_norm(self, pc):
         """ pc: NxC, return NxC """
-        centroid = np.mean(pc, axis=0)
-        pc = pc - centroid
-        m = np.max(np.sqrt(np.sum(pc ** 2, axis=1)))
-        pc = pc / m
-        return pc
+        xyz = pc[:, :3]
+        other_feature = pc[:, 3:]
 
-    def random_sample(self, pc, num):
-        np.random.shuffle(self.permutation)
-        pc = pc[self.permutation[:num]]
+        centroid = np.mean(xyz, axis=0)
+        xyz = xyz - centroid
+        m = np.max(np.sqrt(np.sum(xyz ** 2, axis=1)))
+        xyz = xyz / m
+
+        pc = np.concatenate((xyz, other_feature), axis=1)
         return pc
     
-    def __len__(self):
-        return len(self.list_data_dict)
-
-    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
-        sources = self.list_data_dict[i]
-        if isinstance(i, int):
+    def __getitem__(self, index):
+        sources = self.list_data_dict[index]
+        # print(len(self.list_data_dict), sources)
+        if isinstance(index, int):
             sources = [sources]
-        assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
-        if 'pc' in sources[0]:
+        assert len(sources) == 1, "sources should be a list"
+        if self.point_indicator in sources[0]['conversations'][0]['value']:
 
-            pc_file = self.list_data_dict[i]['pc']
-            if pc_file.endswith('.pt'):
-                pc_data = torch.load(os.path.join(self.pc_folder, pc_file))
-                pc_data = pc_data[:3,:].permute(1, 0).numpy().astype(np.float32)
-            else:
-                pc_data = IO.get(os.path.join(self.pc_folder, pc_file)).astype(np.float32)
+            object_id = self.list_data_dict[index]['object_id']
 
-            if self.uniform and self.sample_points_num < pc_data.shape[0]:
-                pc_data = farthest_point_sample(pc_data, self.sample_points_num)
-            else:
-                pc_data = self.random_sample(pc_data, self.sample_points_num)
-            
-            pc_data = self.pc_norm(pc_data)
+            # Point cloud representation
+            point_cloud = self._load_point_cloud(object_id) # * N, C
+            if self.normalize_pc:
+                point_cloud = self.pc_norm(point_cloud) # * need to norm since point encoder is norm
 
-            if self.augment:
-                pc_data = random_point_dropout(pc_data[None, ...])
-                pc_data = random_scale_point_cloud(pc_data)
-                pc_data = shift_point_cloud(pc_data)
-                pc_data = rotate_perturbation_point_cloud(pc_data)
-                pc_data = rotate_point_cloud(pc_data)
-                pc_data = pc_data.squeeze()
+            if self.tokenizer is None:
+                data_dict = dict(
+                    pcs=torch.from_numpy(point_cloud.astype(np.float32)),
+                    object_ids=object_id
+                )
+                return data_dict
 
-            if self.use_height:
-                self.gravity_dim = 1
-                height_array = pc_data[:, self.gravity_dim:self.gravity_dim + 1] - pc_data[:,
-                                                                        self.gravity_dim:self.gravity_dim + 1].min()
-                pc_data = np.concatenate((pc_data, height_array), axis=1)
-                pc_data = torch.from_numpy(pc_data).float()
-            else:
-                pc_data = torch.from_numpy(pc_data).float()
-            # cur_token_len = (image.shape[1]//14) * (image.shape[2]//14)   # FIXME: 14 is hardcoded patch size
-            cur_token_len = 1   # pc token is only one token
-            # print('berfore process', sources)
             sources = preprocess_multimodal(
-                copy.deepcopy([e["conversations"] for e in sources]),
-                self.multimodal_cfg, cur_token_len)
+                copy.deepcopy([e["conversations"] for e in sources]), self.point_backbone_config, point_indicator=self.point_indicator)
         else:
             sources = copy.deepcopy([e["conversations"] for e in sources])
-        # print('after process', sources)
-        data_dict = preprocess(
+
+        data_dict = preprocess_v1(
             sources,
-            self.tokenizer, 
-            has_image=True)
-        if isinstance(i, int):
+            self.tokenizer)
+
+        if isinstance(index, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0],
                              labels=data_dict["labels"][0])
 
-        # print(self.list_data_dict[i])
-        # print(pc_data.shape)
-        # pc exist in the data
-        if 'pc' in self.list_data_dict[i]:
-            data_dict['pc'] = pc_data
-        elif self.data_args.is_multimodal:
-            # pc does not exist in the data, but the model is multimodal
-            data_dict['pc'] = torch.zeros(1024, 3)
-        # # image exist in the data
-        # if 'image' in self.list_data_dict[i]:
-        #     data_dict['image'] = image
-        # elif self.multimodal_cfg['is_multimodal']:
-        #     # image does not exist in the data, but the model is multimodal
-        #     crop_size = self.multimodal_cfg['image_processor'].crop_size
-        #     data_dict['image'] = torch.zeros(3, crop_size['height'], crop_size['width'])
+        # point exist in the data
+        if self.point_indicator in self.list_data_dict[index]['conversations'][0]['value']:
+            data_dict['pcs'] = torch.from_numpy(point_cloud.astype(np.float32))
+
         return data_dict
 
+    def __len__(self):
+        """Return number of utterances."""
+        return len(self.list_data_dict)
 
-@dataclass
-class DataCollatorForSupervisedDataset(object):
-    """Collate examples for supervised fine-tuning."""
 
-    tokenizer: transformers.PreTrainedTokenizer
+
+
+# @dataclass
+# class DataCollatorForSupervisedDataset(object):
+#     """Collate examples for supervised fine-tuning."""
+
+#     tokenizer: transformers.PreTrainedTokenizer
 
     # def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
     #     input_ids, labels = tuple([instance[key] for instance in instances]
@@ -692,6 +953,40 @@ class DataCollatorForSupervisedDataset(object):
     #             batch['pcs'] = images
 
     #     return batch
+    # def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
+    #     input_ids, labels = tuple([instance[key] for instance in instances]
+    #                               for key in ("input_ids", "labels"))
+    #     input_ids = torch.nn.utils.rnn.pad_sequence(
+    #         input_ids,
+    #         batch_first=True,
+    #         padding_value=self.tokenizer.pad_token_id)
+    #     labels = torch.nn.utils.rnn.pad_sequence(labels,
+    #                                              batch_first=True,
+    #                                              padding_value=IGNORE_INDEX)
+    #     input_ids = input_ids[:, :self.tokenizer.model_max_length]
+    #     labels = labels[:, :self.tokenizer.model_max_length]
+    #     batch = dict(
+    #         input_ids=input_ids,
+    #         labels=labels,
+    #         attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+    #     )
+
+    #     if 'pc' in instances[0]:
+    #         pcs = [instance['pc'] for instance in instances]
+    #         if all(x is not None and x.shape == pcs[0].shape for x in pcs):
+    #             batch['pcs'] = torch.stack(pcs)
+    #         else:
+    #             batch['pcs'] = pcs
+
+    #     return batch
+
+
+@dataclass
+class DataCollatorForPointTextDataset(object):
+    """Collate examples for mixed dataset with text and point cloud data."""
+
+    tokenizer: transformers.PreTrainedTokenizer
+
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels = tuple([instance[key] for instance in instances]
                                   for key in ("input_ids", "labels"))
@@ -702,22 +997,22 @@ class DataCollatorForSupervisedDataset(object):
         labels = torch.nn.utils.rnn.pad_sequence(labels,
                                                  batch_first=True,
                                                  padding_value=IGNORE_INDEX)
-        input_ids = input_ids[:, :self.tokenizer.model_max_length]
-        labels = labels[:, :self.tokenizer.model_max_length]
         batch = dict(
             input_ids=input_ids,
             labels=labels,
             attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
         )
 
-        if 'pc' in instances[0]:
-            pcs = [instance['pc'] for instance in instances]
-            if all(x is not None and x.shape == pcs[0].shape for x in pcs):
-                batch['pcs'] = torch.stack(pcs)
+        if 'pcs' in instances[0]:
+            point_clouds = [instance['pcs'] for instance in instances]
+            if all(x is not None and x.shape == point_clouds[0].shape for x in point_clouds): # * point_clouds have different shapes
+                batch['pcs'] = torch.stack(point_clouds)
             else:
-                batch['pcs'] = pcs
+                batch['pcs'] = point_clouds # * return as lists
 
         return batch
+
+
 
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
                                 data_args) -> Dict:
@@ -727,10 +1022,18 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
     # train_dataset = dataset_cls(tokenizer=tokenizer,
     #                             data_path=data_args.data_path,
     #                             multimodal_cfg=data_args)
-    train_dataset = LazySupervisedDataset(tokenizer=tokenizer,
-                                data_path=data_args.data_path,
-                                multimodal_cfg=data_args)
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    train_dataset = LazySupervisedDataset(
+        split='train',
+        data_path=data_args.data_path,
+        anno_path=data_args.anno_path,
+        pointnum=data_args.pointnum,
+        conversation_types=data_args.conversation_types,
+        tokenizer=tokenizer,
+        use_color=data_args.use_color,
+        data_args=data_args
+    )
+    # data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    data_collator = DataCollatorForPointTextDataset(tokenizer=tokenizer)
     return dict(train_dataset=train_dataset,
                 eval_dataset=None,
                 data_collator=data_collator)
@@ -740,43 +1043,71 @@ def train():
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    # if model_args.vision_tower is not None:
+    #     if 'mpt' in model_args.model_name_or_path:
+    #         model = LlavaMPTForCausalLM.from_pretrained(
+    #             model_args.model_name_or_path,
+    #             cache_dir=training_args.cache_dir,
+    #         )
+    #     else:
+    #         model = LlavaLlamaForCausalLM.from_pretrained(
+    #             model_args.model_name_or_path,
+    #             cache_dir=training_args.cache_dir,
+    #         )
+    # else:
+    #     model = transformers.LlamaForCausalLM.from_pretrained(
+    #         model_args.model_name_or_path,
+    #         cache_dir=training_args.cache_dir,
+    #     )
+    model = LlavaLlamaForCausalLM.from_pretrained(
+        model_args.model_name_or_path,
+        cache_dir=training_args.cache_dir,
+    )
 
-    if model_args.vision_tower is not None:
-        if 'mpt' in model_args.model_name_or_path:
-            model = LlavaMPTForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-            )
-        else:
-            model = LlavaLlamaForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-            )
-    else:
-        model = transformers.LlamaForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-        )
     model.config.use_cache = False
 
-    if model_args.freeze_backbone:
-        model.model.requires_grad_(False)
-
-    if 'mpt' in model_args.model_name_or_path:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right"
-        )
+    # if model_args.freeze_backbone:
+    #     model.model.requires_grad_(False)
+    model.get_model().vision_tower.requires_grad_(False)
+    if training_args.training_stage == 1:
+        # * This will fix all the parameters
+        print("LLM is fixed. Fix_llm flag is set to True")
+        # * fix llama, lm_head, pointnet, projection layer here
+        model.requires_grad_(False)
+        # model.get_model().fix_llm = True
+        model.get_model().mm_projector.requires_grad_(True) 
+        # model.get_model().vision_tower.requires_grad_(False)
+        # model.get_model().vision_tower.requires_grad_(True) # * set as True for fsdp, use fix_pointnet flag to control
+        # model.get_model().vision_tower.requires_grad_(False) # * set as True for fsdp, use fix_pointnet flag to control
     else:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right",
-            use_fast=False,
-        )
+        # model.get_model().fix_llm = False
+        print("LLM is trainable. Fix_llm flag is set to False")
+
+
+    # if 'mpt' in model_args.model_name_or_path:
+    #     tokenizer = transformers.AutoTokenizer.from_pretrained(
+    #         model_args.model_name_or_path,
+    #         cache_dir=training_args.cache_dir,
+    #         model_max_length=training_args.model_max_length,
+    #         padding_side="right"
+    #     )
+    # else:
+    #     tokenizer = transformers.AutoTokenizer.from_pretrained(
+    #         model_args.model_name_or_path,
+    #         cache_dir=training_args.cache_dir,
+    #         model_max_length=training_args.model_max_length,
+    #         padding_side="right",
+    #         use_fast=False,
+    #     )
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_args.model_name_or_path,
+        cache_dir=training_args.cache_dir,
+        model_max_length=training_args.model_max_length,
+        padding_side="right",
+        use_fast=False,
+    )
+    # import pdb
+    # pdb.set_trace()
 
     if model_args.version == "v0":
         if tokenizer.pad_token is None:
@@ -798,24 +1129,25 @@ def train():
         else:
             conversation_lib.default_conversation = conversation_lib.conv_templates["vicuna_v1_1"]
 
-    if model_args.vision_tower is not None:
-        print('=====version: '+ model_args.version)
+    # TODO(coco): what's this for? Maybe the `vision_tower` init in LlavaModel?
+    # if model_args.vision_tower is not None:
+    #     print('=====version: '+ model_args.version)
 
-        model_vision_dict = model.get_model().initialize_vision_modules(
-            vision_tower=model_args.vision_tower,
-            # mm_vision_select_layer=model_args.mm_vision_select_layer,
-            pretrain_mm_mlp_adapter=model_args.pretrain_mm_mlp_adapter
-        )
-        dtype = torch.float32
-        if training_args.fp16:
-            dtype = torch.float16
-        if training_args.bf16:
-            dtype = torch.bfloat16
-        print(dtype)
-        model.get_model().vision_tower.to(dtype=dtype, device=training_args.device)
-        for layer in model.get_model().vision_tower.modules():
-            if isinstance(layer, nn.BatchNorm1d):
-                layer.float()
+    #     model_vision_dict = model.get_model().initialize_vision_modules(
+    #         vision_tower=model_args.vision_tower,
+    #         # mm_vision_select_layer=model_args.mm_vision_select_layer,
+    #         pretrain_mm_mlp_adapter=model_args.pretrain_mm_mlp_adapter
+    #     )
+    #     dtype = torch.float32
+    #     if training_args.fp16:
+    #         dtype = torch.float16
+    #     if training_args.bf16:
+    #         dtype = torch.bfloat16
+    #     print(dtype)
+    #     model.get_model().vision_tower.to(dtype=dtype, device=training_args.device)
+    #     for layer in model.get_model().vision_tower.modules():
+    #         if isinstance(layer, nn.BatchNorm1d):
+    #             layer.float()
 
         # vision_config = model_vision_dict['vision_config']
 
@@ -827,24 +1159,48 @@ def train():
         model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
 
         if model_args.tune_mm_mlp_adapter:
-            model.requires_grad_(False)
-            for p in model.get_model().mm_projector.parameters():
-                p.requires_grad = True
+            # model.requires_grad_(False)
+            print("mm_projection layer is trainable.")
+            # for p in model.get_model().mm_projector.parameters():
+            #     p.requires_grad = True
+            model.get_model().mm_projector.requires_grad_(True)
+        else:
+            model.get_model().mm_projector.requires_grad_(False)
+            print("mm_prejcetion layer is fixed.")
 
-            print('unfreeze vision_tower !!!')
-            for p in model.get_model().vision_tower.parameters():
-                p.requires_grad = True
+            # print('unfreeze vision_tower !!!')
+            # for p in model.get_model().vision_tower.parameters():
+            #     p.requires_grad = True
 
-        model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
-        if training_args.freeze_mm_mlp_adapter:
-            for p in model.get_model().mm_projector.parameters():
-                p.requires_grad = False
+        # model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
+        # if training_args.freeze_mm_mlp_adapter:
+        #     for p in model.get_model().mm_projector.parameters():
+        #         p.requires_grad = False
+        # import pdb
+        # pdb.set_trace()
+        # if training_args.training_stage == 1:  # stage 1
+        #     logging.warning("training stage 1")
+            # model.get_model().load_point_backbone_checkpoint(model_args.vision_tower)
+        # TODO(coco): dont know what this is for yet
+        #     model.initialize_tokenizer_point_backbone_config(tokenizer=tokenizer, device=training_args.device, fix_llm=training_args.fix_llm)
+        # else:
+        #     # * stage2
+        #     model.initialize_tokenizer_point_backbone_config_wo_embedding(tokenizer=tokenizer) 
 
         model.config.mm_use_im_start_end = data_args.mm_use_im_start_end = model_args.mm_use_im_start_end
         # vision_config.use_im_start_end = training_args.use_im_start_end = model_args.mm_use_im_start_end
         # model.config.sep_image_conv_front = data_args.sep_image_conv_front
         # model.initialize_vision_tokenizer(mm_use_im_start_end=model_args.mm_use_im_start_end, tokenizer=tokenizer, device=training_args.device,
         #                                   tune_mm_mlp_adapter=model_args.tune_mm_mlp_adapter, pretrain_mm_mlp_adapter=model_args.pretrain_mm_mlp_adapter)
+        if training_args.training_stage == 1:
+            # * we assume in stage2, llm, point_backbone, and projection layer can be loaded from the model checkpoint
+            print(f"Default point_backbone_ckpt is {model_args.vision_tower}.")
+            model.get_model().load_point_backbone_checkpoint(model_args.vision_tower)
+            model.initialize_tokenizer_point_backbone_config(tokenizer=tokenizer, device=training_args.device, training_stage=training_args.training_stage)
+        else:
+            # * stage2
+            model.initialize_tokenizer_point_backbone_config_wo_embedding(tokenizer=tokenizer) 
+
 
         params_no_grad = [n for n, p in model.named_parameters() if not p.requires_grad]
 
@@ -866,49 +1222,52 @@ def train():
 
                 FSDP.__init__ = patch_FSDP_use_orig_params(FSDP.__init__)
 
+
+    data_args.point_backbone_config = model.get_model().point_backbone_config
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
     base_lr = training_args.learning_rate
     vision_tower_lr_multiplier = 0.01
     # 获取模型的参数
 
-    parameters = model.named_parameters()
+    # parameters = model.named_parameters()
 
-    optimizer_grouped_parameters = []
-    for name, param in parameters:
-        if "vision_tower" in name:
-            # print(name)
-            # 如果参数的名称包含"vision_tower"，则将其学习率设置为基础学习率的0.01倍
-            optimizer_grouped_parameters.append({"params": param, "lr": base_lr * vision_tower_lr_multiplier})
-        else:
-            # 其他参数保留基础学习率
-            optimizer_grouped_parameters.append({"params": param, "lr": base_lr})
-    optimizer = torch.optim.AdamW(optimizer_grouped_parameters)
+    # optimizer_grouped_parameters = []
+    # for name, param in parameters:
+    #     if "vision_tower" in name:
+    #         # print(name)
+    #         # 如果参数的名称包含"vision_tower"，则将其学习率设置为基础学习率的0.01倍
+    #         optimizer_grouped_parameters.append({"params": param, "lr": base_lr * vision_tower_lr_multiplier})
+    #     else:
+    #         # 其他参数保留基础学习率
+    #         optimizer_grouped_parameters.append({"params": param, "lr": base_lr})
+    # optimizer = torch.optim.AdamW(optimizer_grouped_parameters)
 
     # 定义训练参数
     num_train_steps = int(len(data_module["train_dataset"]) / (training_args.per_device_train_batch_size * training_args.num_gpus * training_args.gradient_accumulation_steps) * training_args.num_train_epochs)
-    warmup_ratio = training_args.warmup_ratio
+    # warmup_ratio = training_args.warmup_ratio
     print(num_train_steps)
     # 创建学习率调度器对象
-    scheduler = transformers.get_scheduler(
-        "cosine",
-        optimizer=optimizer,
-        num_warmup_steps=int(num_train_steps * warmup_ratio),
-        num_training_steps=num_train_steps
-    )
+    # scheduler = transformers.get_scheduler(
+    #     "cosine",
+    #     optimizer=optimizer,
+    #     num_warmup_steps=int(num_train_steps * warmup_ratio),
+    #     num_training_steps=num_train_steps
+    # )
 
     # print(scheduler)
 
     trainer = LLaVATrainer(model=model,
                     tokenizer=tokenizer,
                     args=training_args,
-                    optimizers=(optimizer, scheduler),
+                    # optimizers=(optimizer, scheduler),
                     **data_module)
     
     # for name, param in model.named_parameters():
     #     if param.requires_grad:
     #         print(name)
-
+    # import pdb
+    # pdb.set_trace()
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)
     else:
