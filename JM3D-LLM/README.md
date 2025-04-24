@@ -14,6 +14,8 @@ Dwonload the instuction data [pc_chat_Cap3D_660k.json](https://stuxmueducn-my.sh
 
 Download the [Cap3D datasets](https://huggingface.co/datasets/tiange/Cap3D/tree/main/PointCloud_pt_zips), and unzip and put the point cloud data into `data/Objaverse/Cap3D_pcs_pt/`.
 
+Download [pc_chat_Cap3D_660k_v2.json](https://huggingface.co/datasets/Charilie/JM3D-LLM)
+
 ## Install
 
 1. Following the LLaVA settings, clone the repository and navigate to LLaVA folder
@@ -54,6 +56,10 @@ Modify the `model_path` in `scripts/test_pretrain_pc.sh`, and
 ```
 bash scripts/test_pretrain_pc.sh
 ```
+
+## Checkpoint
+
+Trained ckpt can be download [here](https://huggingface.co/Charilie/JM3D-LLM)
 
 ## Acknowledgement
 
